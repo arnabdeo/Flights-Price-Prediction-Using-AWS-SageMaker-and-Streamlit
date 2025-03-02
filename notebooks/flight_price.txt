@@ -1,0 +1,201 @@
+Key Notes from flight prediction:
+-**Data Cleaning**
+
+-- lambda gets access to the current state of the dataframe, not the original one we are putting in the function.
+if we directly used assign without lambda, we had to call df.Airline i.e. making changes to the original data which is inconvenient. so 
+we assign with a lambda fn where we can make changes to the dataframe inside the function(the one which has been transformed with lowercase)
+without effecting the original dataset.
+
+-- .assign(**{
+            col: df[col].str.strip()
+            for col in df.select_dtypes(include='O').columns
+        })
+here all dtypes are of objects except price, so include 'o' means it looks for dtype containing letter 'o' so for every column removing all
+white spaces, tabs etc etc. Next we do dictionary comprehension where col is the key and the operation is values and it returns exactly due 
+to inbuilt pandas programme with help of **{} out there(dictionary unpacking).
+
+-- Vistara and Vistara Premium economy are not different, so they has to be converted. Same for Jet Airways, multiple carriers.
+
+-- writing code inside () is just contain a block of code which makes the code more readible
+
+-- Once from the original data, df has been transformed to lowercases, we are using assign on that df itself everything inside the function without effecting the original data.
+-- (
+df
+    .Dep_Time
+    .loc[lambda ser: ser.str.contains("[^0-9:]")]
+)
+to check in the dep_time str series is there any other values other than 0-9 and : (if no empty [] will be returned else will return smthg else)
+
+-- Duration part was really good. We checked for duration in minutes and found one invalid entry, we dropped it and with the remaining items, we try to convert the "hr min" format to only min.
+
+-- duration=lambda df_: df_.duration.pipe(convert_to_minutes)
+
+this is a pipe function which can be used in series or dataframe where inside it we call a function which will work on the feature to which it is called. this is similar to :  convert_to_minutes(df_.duration)
+
+-- In pandas, the missing values are in float.  #int cant work due to nan so float is only compatible type, so thats why in total_stops had to go with pd.to_numeric()
+
+-- Split the data:
+X = df_final.drop(columns="price")
+y = df_final.price.copy()
+
+here copy() creates an independent copy, it doesn't change if the original df_final.price is modified. this is more safe.
+
+-- export the subsets: #index is false, else pandas change the original index as column.
+
+
+-descriptive stats:
+-- Measure of location(1st moment of distribution): Mean, mode, Median, Percentiles, Quantiles
+-- Measure of spread(2nd moment of distn): Variance, Standard deviation, Coefficient of variance, Mean absolute error,IQR, Median absolute deviation. (first 4 is prone to outliers, last 2 are robust)
+--Measure of symmetry( 3rd moment of distn): Skewness
+--Measure of shape (4th moment of distn): Kurtosis
+
+-inference:
+-- Strength of Association: Pearson's correlation(assumption of linearly related), Spearman's Rank Correlation(no such assumption), Cramer's V (correlation b/w two categorical variables(explained in notes))
+--Test for normality: Shapiro-wilk test, Anderson-Darling test (for numeric variable)
+-- Test for association: Pearson's test, Spearman's Test (numeric variable), Chi-sq test(categorical), one-way anova test, kruskal-wallis test (numeric-categorical)
+
+-plots:
+
+univariate
+--numeric: histogram,kde plot(smoothed histogram) ,rug plot(gives vertical lines to data points in x-axis),boxplot,violin plot(boxplot+kde plot), q-q plot
+--categorical: count plot, pie chart
+-- time-related: line plot, aggregated line plot
+
+bivariate
+--numeric-numeric: scatter plot,hexagonal bin plot
+--numeric-categorical: bar plot, box plot, kde plot, violin plot
+--categorical-categorical: bar plot, stacked bar plot,frequency heatmap
+
+multivariate
+--pair plots,heatmap, facet grid(seaborn)
+
+- **EDA**
+-- in data cleaning, we transformed the column into valid forms but in eda we change the datatypes on the valid forms.
+-- total stops is coming under numeric though it is categorical so need to change it
+-- isolation forest (outlier){bagging algorithm}- ensemble algorithm(it'll pick randomly one feature, randomly pick one value and split on that value. the outlier will be isolated in the top itself and like this it'll do for all features and based on average score at end, outliers will be denoted by -1 or else +1)
+-- .query is to filterate the dataframe
+-- train.groupby(pd.Grouper(key='date_of_journey',freq='W')).price.mean().to_frame().rename_axis(index='weekly').plot(kind='bar',figsize=(8,4),edgecolor='black')
+Grouper is used for time series data
+-- Hexbin plot gives a range where the frequency is max, here in duration 500-1000 the prices were about 10k.
+-- duration_grid=sns.FacetGrid(
+data=train,col='source',hue='total_stops',sharey=True)
+duration_grid.map(sns.scatterplot,'duration','price')
+first make the grid then calling the grid, plot multivariate graphs to make things more visuals.
+-- since there's an potential outlier in duration still we dont know the reason whether the duration is high due to turbulance or traffic or whatever so we cant consider it to be outlier without enough evidence.
+
+
+-**FEATURE ENGINEERING**
+-- pd.set_option('display.max_columns',None) #forcing pandas to display all the columns else it doesnt show
+-- sklearn.set_config(transform_output='pandas') by default sklearn outputs return numpy arrays, we can select it to pandas dataframe
+-airline: here 4 categories are rare categories since counts are very less comparatively so we can group those 4 categories as one then we'll perform one-hot encoding
+--A Pipeline in scikit-learn is a way to chain multiple data preprocessing steps and a model into a single workflow.
+air_transformer=Pipeline(steps=[
+    ("imputer",SimpleImputer(strategy='most_frequent')),
+    ("grouper",RareLabelEncoder(tol=0.1,replace_with='Other',n_categories=2)),
+    ("encoder",OneHotEncoder(sparse_output=False,handle_unknown='ignore'))
+])
+-- since we want to see output, ohe sparse_output='false' and handle_unknown='ignore' meaning in val set or test set if it encounters with new categories, it'll simply ignore them without throwing an error
+air_transformer.fit_transform(X_train.loc[:,['airline']]).airline.value_counts()
+imputer is for missing values, it fill missing value with most_frequent(mode)
+grouper groups those categories which are less than 10% of the total data provided atleast two groups must be there. (here other)
+encoder(OHE) is a technique used to convert categorical data into numerical form so that machine learning models can process it.
+-date of journey: 
+--min max scaling converts values btw 0 to 1
+-- feature engine is using pandas only since the features are already common with pandas
+-- converting the doj inputs (2019-04-01 eg.) into different columns like month date, week date, year date etc etc..
+-- here min max scaler is used with thought process that we know the range of the dates (there's no rule though which to use)
+-source and destination:
+-- Mean encoding find the average price for each category and that avg(price) will be encoded in that category
+--Power Transformer is x^lambda where lambda is chosen in such a way that the transformed variable is symmetric as possible.
+-- we carry out a custom transformation whether the locations are of north or not
+-- now to combine two set of transformations(is_north and the other) with feature union
+-dep and arrival time:
+--Count Encoding is it replaces the category with the counts of that category in that column
+-duration: first handle outliers and missing values then go through few transformations.
+--RBF kernel(used in svm) is a function which calculates similarities btw two values. 
+-- class RBFPercentileSimilarity(BaseEstimator,TransformerMixin) on inheriting these BaseEstimator,TransformerMixin classes, our RBFPercentileSimilarity class has become sklearn compatible class.
+-- outliers will be handled by replacing the nearest limit values if in case they cross the whisker plot.
+- Feature Selection: SelectBySingleFeaturePerformance this algorithm runs random forest in each feature individually and scoring method is 'r2' (by default roc_auc). The feature with low score will be eliminated else gets selected.
+-- OrdinalEncoder is a preprocessing tool from sklearn.preprocessing that converts categorical variables into integer-encoded values based on a specified or inferred order. When your categorical values have an inherent order (e.g., low < medium < high).
+- FEATURE SELECTION:
+-- filter based methods doesnt involve any machine learning algorithm. if data is very large or have high no of features, we can use filter based. though wrapper method and embedded uses machine learning so it will give better result but at the cost of time complexity.
+-- wrapper method is more powerful since it involves machine learning
+-- embedded method select features based on only a single model. for eg in Linear regression have coefficients so based on that coefficient it will reject or select features (i.e. based on single trained model)
+
+--MODEL TRAINING
+- sagemaker expects the data in y x format (meaning price, airline, doj,... this way)
+y.to_frame().join(X_pre).to_csv(file_name,index=False,header=False)
+ due to header=False column names has been also tranformed to numerics, but sagemaker need the data in such formats.
+
+-file_name=get_file_name(name) 
+boto3.Session().resource('s3').Bucket(bucket_name).Object(os.path.join(data_prefix,f"{name}/{name}.csv")).upload_file(file_name)
+calling boto3 so we can use multiple aws resources, session means which environment im currently using,resource means which application to use, bucket means name of the bucket, boject means how and where to save the file and upload_file means which file to upload
+
+- export_and_upload_bucket(train,'train',preprocessor) here what happens is it transformed the training data and saved it as train-pre and also uploaded to bucket
+-- model=Estimator(
+image_uri=sagemaker.image.uris.retrieve('xgboost',region_name,'1.2-1'),
+role=sagemaker.get_execution_role(),
+instance_count=1,
+instance_type='ml.m4.xlarge',
+volume_size=5,
+output_path=output_path,
+use_spot_instances=True,
+max_run=300,
+max_wait=600,
+sagemaker_session=session)
+ image_uri (image uniform resource identifier):sagemaker has lots of algorithm, so they save these algorithm as docker containers (as images) so it retrieve xgboost algorithm with region name and version
+ role: this uses IAM role
+ instance_count: no of ec2 instances
+ instance_type: type of ec2
+ volume_size= size of s3 here 5 means 5 gb free storage
+ output_path: where to save the model
+ to save time-
+ max_run: to run this for max to max 300 secs
+ max_wait: wait for 600 secs max
+ 
+ -- model.set_hyperparameters(
+    objective="reg:linear",
+    num_round=10,
+    eta=0.1,
+    max_depth=5,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    alpha=0.1
+)
+objective: 'reg:linear' means mean sq error
+num_round: no of base estimators (since we are using xgboost but in handles both regressiona nd classifcation)
+eta: learning rate
+max_depth: depth of the tree
+subsample: 0.8(for each tree randomly take out 80% of the rows)
+colsample_bytree: 0.8 (for each tree randomly take out 80% of the columns)
+each base estimator will not be trained on same dataset(train on its subset), we do so to avoid overfitting
+alpha: l2 regularisation
+tuner = HyperparameterTuner(
+    estimator=model,
+    objective_metric_name="validation:rmse",
+    hyperparameter_ranges=hyperparameter_ranges,
+    strategy="Bayesian",
+    objective_type="Minimize"
+)
+objective_metric_type: on which data you want to try out the hyperparameter tuning, ofc on validation set use root mean sq error. no to train or test.
+strategy: bayesian optimisation
+objective_type: we want to 'minimse' the root mean sq error
+
+- Data Channels sections to give the path to sagemaker so that it can find the train and val data and process with tuning. it will test on training data and evaluate on validation data. so we have to provide both of them to sagemaker.
+
+-def evaluate_model(name):
+    file_name=get_file_name(name)
+    data=pd.read_csv(file_name)
+    
+    X=xgb.DMatrix(data.iloc[:,1:])
+    y= data.iloc[:,0].copy()
+    
+    pred=best_model.predict(X)
+    return r2_score(y,pred)
+xgboost demands the data in different format so xgb.DMatrix is specific for xgboost
+
+we can increase and change the hyperparameters for best result since we are using sagemaker, on using more the cost will increase so its not implemented that much.
+
+--STREAMLIT
+pandas uses to_time for datetime (here doj,dep_time,arrival_time) which will not work on streamlit datetime objects. so we need to convert these doj, etc to string so that on transformation pandas can easily transform these to its own DateTime type.
+in st.info(), it appears in a blue box
